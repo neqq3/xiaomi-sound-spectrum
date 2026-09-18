@@ -1,0 +1,56 @@
+name: Build visualizers
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag or commit to build
+        required: true
+        default: dev/oh2p-support
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.source_ref }}
+      - name: Record source revision
+        run: git rev-parse HEAD
+      - name: Install compilers
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+      - name: Check scripts and OH2P pixel mapping
+        run: |
+          bash -n build.sh
+          sh -n run-oh2p.sh
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined tests/oh2p_output_test.c -o /tmp/oh2p-output-test
+          /tmp/oh2p-output-test
+      - name: Build both devices
+        run: |
+          bash build.sh
+          bash build.sh oh2p
+          file led_music led_music_oh2p
+          readelf -h led_music_oh2p | grep AArch64
+          if readelf -l led_music_oh2p | grep -q INTERP; then
+            echo 'Unexpected runtime loader dependency'; exit 1
+          fi
+      - name: Verify the original device build is unchanged
+        run: |
+          mkdir /tmp/original-spectrum
+          git show c2f4973b562b66fc33e7d84b22de10498f78126a:led_music.c > /tmp/original-spectrum/led_music.c
+          git show c2f4973b562b66fc33e7d84b22de10498f78126a:build.sh > /tmp/original-spectrum/build.sh
+          bash /tmp/original-spectrum/build.sh
+          cmp /tmp/original-spectrum/led_music led_music
+      - name: Prepare download
+        run: |
+          mkdir -p dist/l06a dist/oh2p
+          cp led_music dist/l06a/
+          cp led_music_oh2p run-oh2p.sh docs/oh2p.md dist/oh2p/
+          (cd dist && sha256sum l06a/led_music oh2p/led_music_oh2p oh2p/run-oh2p.sh > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visualizers-linux-arm64
+          path: dist/
+          retention-days: 14
