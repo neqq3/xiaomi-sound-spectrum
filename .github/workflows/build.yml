@@ -25,12 +25,15 @@ jobs:
         run: |
           bash -n build.sh
           sh -n run-oh2p.sh
+          python3 -B -m unittest discover -s tests -p test_deploy_oh2p.py -v
           cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined tests/oh2p_output_test.c -o /tmp/oh2p-output-test
           /tmp/oh2p-output-test
       - name: Build both devices
         run: |
+          cp led_music_oh2p /tmp/distributed-oh2p
           bash build.sh
           bash build.sh oh2p
+          cmp /tmp/distributed-oh2p led_music_oh2p
           file led_music led_music_oh2p
           readelf -h led_music_oh2p | grep AArch64
           if readelf -l led_music_oh2p | grep -q INTERP; then
@@ -47,8 +50,8 @@ jobs:
         run: |
           mkdir -p dist/l06a dist/oh2p
           cp led_music dist/l06a/
-          cp led_music_oh2p run-oh2p.sh docs/oh2p.md dist/oh2p/
-          (cd dist && sha256sum l06a/led_music oh2p/led_music_oh2p oh2p/run-oh2p.sh > SHA256SUMS)
+          cp led_music_oh2p run-oh2p.sh deploy-oh2p.py docs/oh2p.md dist/oh2p/
+          (cd dist && sha256sum l06a/led_music oh2p/led_music_oh2p oh2p/run-oh2p.sh oh2p/deploy-oh2p.py > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
           name: visualizers-linux-arm64
