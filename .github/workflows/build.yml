@@ -7,6 +7,15 @@ on:
         required: true
         default: dev/oh2p-support
         type: string
+      upstream_ref:
+        description: Upstream commit used for the unchanged L06A comparison
+        required: true
+        default: 380d2c517e33c2d669398d921b85616a5b3dffe3
+        type: string
+      verify_committed_binary:
+        description: Verify the committed OH2P binary (disable only to generate an update)
+        default: true
+        type: boolean
 permissions:
   contents: read
 jobs:
@@ -20,7 +29,20 @@ jobs:
       - name: Record source revision
         run: git rev-parse HEAD
       - name: Install compilers
-        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm qemu-user
+      - name: Build both devices
+        env:
+          VERIFY_COMMITTED_BINARY: ${{ inputs.verify_committed_binary }}
+        run: |
+          cp led_music_oh2p /tmp/distributed-oh2p
+          bash build.sh
+          bash build.sh oh2p
+          if [ "$VERIFY_COMMITTED_BINARY" = true ]; then cmp /tmp/distributed-oh2p led_music_oh2p; fi
+          file led_music led_music_oh2p
+          readelf -h led_music_oh2p | grep AArch64
+          if readelf -l led_music_oh2p | grep -q INTERP; then
+            echo 'Unexpected runtime loader dependency'; exit 1
+          fi
       - name: Check scripts and OH2P pixel mapping
         run: |
           bash -n build.sh
@@ -30,22 +52,15 @@ jobs:
           python3 -B -m unittest discover -s tests -p 'test_*.py' -v
           cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined tests/oh2p_output_test.c -o /tmp/oh2p-output-test
           /tmp/oh2p-output-test
-      - name: Build both devices
-        run: |
-          cp led_music_oh2p /tmp/distributed-oh2p
-          bash build.sh
-          bash build.sh oh2p
-          cmp /tmp/distributed-oh2p led_music_oh2p
-          file led_music led_music_oh2p
-          readelf -h led_music_oh2p | grep AArch64
-          if readelf -l led_music_oh2p | grep -q INTERP; then
-            echo 'Unexpected runtime loader dependency'; exit 1
-          fi
       - name: Verify the original device build is unchanged
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
         run: |
+          test "${#UPSTREAM_REF}" -eq 40
+          case "$UPSTREAM_REF" in *[!0-9a-f]*) exit 1;; esac
           mkdir /tmp/original-spectrum
-          git show c2f4973b562b66fc33e7d84b22de10498f78126a:led_music.c > /tmp/original-spectrum/led_music.c
-          git show c2f4973b562b66fc33e7d84b22de10498f78126a:build.sh > /tmp/original-spectrum/build.sh
+          git show "${UPSTREAM_REF}:led_music.c" > /tmp/original-spectrum/led_music.c
+          git show "${UPSTREAM_REF}:build.sh" > /tmp/original-spectrum/build.sh
           bash /tmp/original-spectrum/build.sh
           cmp /tmp/original-spectrum/led_music led_music
       - name: Prepare download
